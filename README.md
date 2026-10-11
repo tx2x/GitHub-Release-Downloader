@@ -133,8 +133,8 @@ Open `Download-GitHub-Releases.ps1` in a text editor and find the **REPOSITORY L
 ```powershell
 $Repositories = @(
     [pscustomobject]@{ Owner = 'ggml-org';  Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
+    [pscustomobject]@{ Owner = 'earendil-works';   Name = 'pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'anomalyco'; Name = 'opencode';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'can1357';   Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'storytold'; Name = 'photocraft'; ReleaseChannel = 'Stable' }
     # Add more repositories by copying a line above.
 )
