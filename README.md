@@ -221,7 +221,7 @@ Review the URL, available disk space, network connection, and aria2 error detail
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ## Useful links
 
