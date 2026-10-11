@@ -123,7 +123,7 @@ Before creating the download queue, the script asks whether to include each of t
 
 | Option | Default | Behavior |
 |---|---:|---|
-| Platform-specific assets | **No** | Excludes asset names containing `arm64`, `aarch64`, `riscv`, `darwin`, or `.dmg` unless enabled. Matching is case-insensitive. |
+| Platform-specific assets | **No** | Excludes asset names containing `arm64`, `aarch64`, `riscv`, `darwin`, `-mac`, or `.dmg` unless enabled. Matching is case-insensitive. |
 | `.msi` installers | **Yes** | Includes assets whose names end in `.msi`. |
 | Release source ZIP | **Yes** | Adds GitHub's automatically generated ZIP archive for the selected release/tag, saved as `source-code.zip`. |
 | Repository README | **Yes** | Downloads the repository's `README.md` from its default branch into the release folder. |
