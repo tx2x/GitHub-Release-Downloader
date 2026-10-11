@@ -86,6 +86,46 @@ The script provides two download modes:
 
 The specific-release option downloads that published release tag; it does not replace or modify the configured channel for the repository list. Draft releases are not supported.
 
+### Selecting repositories
+
+When you choose the newest-release mode, the repository selection menu starts with **nothing selected**. Select only the repositories you want to download. The script will not proceed when you press Enter with an empty selection.
+
+The menu accepts individual numbers, ranges, and combinations of both. Separate entries with commas, semicolons, or spaces. For example:
+
+```text
+1, 2, 5-16
+```
+
+This selects repositories 1 and 2, plus every repository from 5 through 16. The numbers refer to the entries as displayed in the menu.
+
+You can remove entries by prefixing a number or range with a minus sign (`-`). For example, after selecting a range, enter:
+
+```text
+-3, -7-9
+```
+
+This removes repository 3 and repositories 7 through 9 from the current selection. Exclusion-only input edits the current selection in place. If an entry includes both numbers/ranges and exclusions, the included numbers/ranges create a fresh selection first, and the exclusions are then removed. For example:
+
+```text
+1-17, -3, -7-9
+```
+
+This selects repositories 1 through 17 except 3 and 7 through 9.
+
+Menu shortcuts:
+
+| Input | Action |
+|---|---|
+| `1, 2, 5-16` | Select the specified entries and ranges. |
+| `-3` | Remove entry 3 from the current selection. |
+| `-3, -7-9` | Remove entry 3 and entries 7 through 9 from the current selection. |
+| `A` | Select all repositories. |
+| `N` | Clear the selection. |
+| `Enter` | Confirm the selection; at least one repository must be selected. |
+| `Q` | Quit the repository-selection menu. |
+
+A normal inclusion input replaces the current selection. To fine-tune an existing selection without replacing it, enter only exclusions such as `-2, -5-7`. You can then press Enter to confirm.
+
 ## Configure repositories
 
 Open `Download-GitHub-Releases.ps1` in a text editor and find the **REPOSITORY LIST** section near the beginning of the file:
