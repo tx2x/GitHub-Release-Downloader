@@ -219,6 +219,9 @@ Review the URL, available disk space, network connection, and aria2 error detail
 - Use moderate concurrency and respect GitHub API rate limits and bandwidth policies. Do not use the script for abusive or excessive automated bulk downloading.
 - This project is not affiliated with or endorsed by GitHub or by the maintainers of the example repositories.
 
+## Credits
+The code was written using web version of ChatGPT 😁.
+
 ## License
 
 [MIT](LICENSE)
