@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-Download-GitHub-Releases.ps1
+GitHub-Release-Downloader.ps1
 
 Downloads assets from the selected release channel for each chosen GitHub repository.
 All repository settings are stored in this file; no extra config files are required.
