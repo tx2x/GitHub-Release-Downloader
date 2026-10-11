@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-GitHub-Release-Downloader.ps1
+Download-GitHub-Releases.ps1
 
 Downloads assets from the selected release channel for each chosen GitHub repository.
 All repository settings are stored in this file; no extra config files are required.
@@ -26,10 +26,11 @@ $ErrorActionPreference = 'Stop'
 # ReleaseChannel must be 'Stable' or 'Pre-release'.
 # ============================================================================
 $Repositories = @(
-    [pscustomobject]@{ Owner = 'ggml-org';  Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
-    [pscustomobject]@{ Owner = 'anomalyco'; Name = 'opencode';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'can1357';   Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold'; Name = 'photocraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'ggml-org';      Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
+    [pscustomobject]@{ Owner = 'earendil-works'; Name = 'pi';         ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'anomalyco';     Name = 'opencode';   ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'photocraft'; ReleaseChannel = 'Stable' }
+
     # Add more repositories by copying a line above.
 )
 
@@ -267,7 +268,9 @@ function Select-Repositories {
     param([Parameter(Mandatory = $true)][object[]]$RepoList)
 
     if ($RepoList.Count -eq 0) { throw 'The $Repositories list is empty. Add at least one repository near the top of this script.' }
-    $selected = @(for ($i = 0; $i -lt $RepoList.Count; $i++) { $i })
+
+    # Start with nothing selected by default.
+    $selected = @()
 
     while ($true) {
         Write-Host ''
@@ -278,12 +281,13 @@ function Select-Repositories {
             Write-Host (' [{0}] {1}. {2}/{3} ({4})' -f $mark, ($i + 1), $RepoList[$i].Owner, $RepoList[$i].Name, $channel)
         }
         Write-Host ''
-        Write-Host 'Enter numbers separated by commas (e.g. 1,3). A = select all; N = clear; Enter = confirm; Q = quit.'
+        Write-Host 'Enter numbers/ranges (e.g. 1, 2, 5-16). Prefix numbers/ranges with - to remove (e.g. -3, -7-9).'
+        Write-Host 'A = select all; N = clear all; Enter = confirm; Q = quit.'
         $answer = (Read-Host 'Selection').Trim()
 
         if ([string]::IsNullOrWhiteSpace($answer)) {
             if ($selected.Count -eq 0) {
-                Write-Host 'Select at least one repository, or enter Q to quit.' -ForegroundColor Yellow
+                Write-Host 'Nothing is selected. Enter numbers/ranges, A to select all, or Q to quit.' -ForegroundColor Yellow
                 continue
             }
             return [pscustomobject]@{ Cancelled = $false; Indices = @($selected | Sort-Object -Unique) }
@@ -292,20 +296,59 @@ function Select-Repositories {
             $selected = @(for ($i = 0; $i -lt $RepoList.Count; $i++) { $i })
             continue
         }
-        if ($answer -match '^(?i:n|none)$') { $selected = @(); continue }
+        if ($answer -match '^(?i:n|none|clear)$') { $selected = @(); continue }
         if ($answer -match '^(?i:q|quit)$') { return [pscustomobject]@{ Cancelled = $true; Indices = @() } }
 
+        # Parse every token before changing the current selection, so invalid
+        # input never leaves the menu in a partially modified state.
         $tokens = @($answer -split '[,;\s]+' | Where-Object { $_ -ne '' })
-        $newSelection = @()
-        $valid = $true
+        $parsedTokens = New-Object 'System.Collections.Generic.List[object]'
+        $valid = ($tokens.Count -gt 0)
         foreach ($token in $tokens) {
-            if ($token -notmatch '^\d+$') { $valid = $false; break }
-            $number = [int]$token
-            if ($number -lt 1 -or $number -gt $RepoList.Count) { $valid = $false; break }
-            $newSelection += ($number - 1)
+            if ($token -notmatch '^(?<exclude>[-!]?)(?<start>\d+)(?:-(?<end>\d+))?$') {
+                $valid = $false
+                break
+            }
+
+            $exclude = -not [string]::IsNullOrEmpty($Matches.exclude)
+            $startNumber = [int]$Matches.start
+            $endNumber = if ([string]::IsNullOrEmpty($Matches.end)) { $startNumber } else { [int]$Matches.end }
+
+            if ($startNumber -lt 1 -or $endNumber -lt 1 -or
+                $startNumber -gt $RepoList.Count -or $endNumber -gt $RepoList.Count -or
+                $startNumber -gt $endNumber) {
+                $valid = $false
+                break
+            }
+
+            $indices = @($startNumber..$endNumber | ForEach-Object { $_ - 1 })
+            $parsedTokens.Add([pscustomobject]@{ Exclude = $exclude; Indices = $indices })
         }
-        if ($valid -and $newSelection.Count -gt 0) { $selected = @($newSelection | Sort-Object -Unique) }
-        else { Write-Host 'Invalid selection. Enter valid numbers, A, N, or Q.' -ForegroundColor Yellow }
+
+        if (-not $valid) {
+            Write-Host ("Invalid selection. Use numbers/ranges from 1 to {0}, e.g. 1, 2, 5-8, -3, or -6-9." -f $RepoList.Count) -ForegroundColor Yellow
+            continue
+        }
+
+        $includeTokens = @($parsedTokens | Where-Object { -not $_.Exclude })
+        $excludeTokens = @($parsedTokens | Where-Object { $_.Exclude })
+
+        if ($includeTokens.Count -gt 0) {
+            # When inclusions are present, they define a fresh selection.
+            # Exclusions in the same input are then removed from that selection.
+            $workingSelection = @($includeTokens | ForEach-Object { $_.Indices } | Sort-Object -Unique)
+        } else {
+            # Exclusion-only input edits the current selection in place.
+            $workingSelection = @($selected)
+        }
+
+        foreach ($exclusion in $excludeTokens) {
+            foreach ($indexToRemove in $exclusion.Indices) {
+                $workingSelection = @($workingSelection | Where-Object { $_ -ne $indexToRemove })
+            }
+        }
+
+        $selected = @($workingSelection | Sort-Object -Unique)
     }
 }
 
@@ -399,7 +442,7 @@ if ($mainChoice -match '^(?i:1|latest)$') {
 
 Write-Host ''
 Write-Host '========== Download options ==========' -ForegroundColor Cyan
-$includeSpecial = Read-YesNo 'Download files containing arm64, aarch64, riscv, darwin, -mac or .dmg in the file name?' $false
+$includeSpecial = Read-YesNo 'Download files containing arm64, aarch64, riscv, darwin, -mac, or .dmg in the file name?' $false
 $includeMsi = Read-YesNo 'Download .msi files?' $true
 $includeSourceZip = Read-YesNo 'Download the release source code ZIP?' $true
 $includeReadme = Read-YesNo 'Download README.md from the repository default branch?' $true
