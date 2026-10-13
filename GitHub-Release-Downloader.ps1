@@ -41,6 +41,7 @@ $ExcludedNamePatterns = @(
     'aarch64'
     'riscv'
     'darwin'
+    '.dmg'
     '-mac'
     'sycl'
     's390x'
@@ -458,50 +459,69 @@ if ($mainChoice -match '^(?i:1|latest)$') {
 
 Write-Host ''
 Write-Host '========== Download options ==========' -ForegroundColor Cyan
-Write-Host 'Filename filters apply to release assets only. Source ZIP and README are controlled by their own options.' -ForegroundColor DarkGray
+Write-Host 'Default mode downloads all release assets without filename filters, plus Source ZIP and README.md.' -ForegroundColor DarkGray
+
+# Keep the default path simple: one filter question, with filtering disabled by default.
+# If the user opts into filters, offer the advanced filtering and download-category options.
+$applyFilters = Read-YesNo 'Apply filters and optional download restrictions for this run?' $false
 
 $usableExcludedPatterns = @($ExcludedNamePatterns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-$useConfiguredExclusions = $false
-if ($usableExcludedPatterns.Count -gt 0) {
-    $excludedPatternsLabel = $usableExcludedPatterns -join ', '
-    $useConfiguredExclusions = Read-YesNo "Apply configured filename exclusions ($excludedPatternsLabel)?" $true
-} else {
-    Write-Host 'No default filename exclusion patterns are configured.' -ForegroundColor DarkGray
-}
-
-$extraExcludedPatterns = @()
-$addExtraExclusions = Read-YesNo 'Add extra filename exclusion keywords for this run?' $false
-if ($addExtraExclusions) {
-    while ($extraExcludedPatterns.Count -eq 0) {
-        $extraExcludeInput = Read-Host 'Enter extra exclusion keywords separated by commas or semicolons (e.g. openvino, debug)'
-        $extraExcludedPatterns = @($extraExcludeInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
-        if ($extraExcludedPatterns.Count -eq 0) {
-            Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
-        }
-    }
-}
-
 $activeExcludedPatterns = @()
-if ($useConfiguredExclusions) { $activeExcludedPatterns += $usableExcludedPatterns }
-if ($extraExcludedPatterns.Count -gt 0) { $activeExcludedPatterns += $extraExcludedPatterns }
-$activeExcludedPatterns = @($activeExcludedPatterns | Select-Object -Unique)
-$useExcludedNamePatterns = ($activeExcludedPatterns.Count -gt 0)
-
-$useOnlyMatchingNames = Read-YesNo 'Download only release assets whose names contain at least one keyword you specify?' $false
+$useExcludedNamePatterns = $false
+$useOnlyMatchingNames = $false
 $includeOnlyNamePatterns = @()
-if ($useOnlyMatchingNames) {
-    while ($includeOnlyNamePatterns.Count -eq 0) {
-        $patternInput = Read-Host 'Enter filename keywords separated by commas or semicolons (e.g. cuda, vulkan, win-cuda)'
-        $includeOnlyNamePatterns = @($patternInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
-        if ($includeOnlyNamePatterns.Count -eq 0) {
-            Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
+$includeMsi = $true
+$includeSourceZip = $true
+$includeReadme = $true
+
+if ($applyFilters) {
+    Write-Host ''
+    Write-Host '========== Advanced filters and download options ==========' -ForegroundColor Cyan
+    Write-Host 'Filename filters apply to release assets only. Source ZIP and README are controlled separately.' -ForegroundColor DarkGray
+
+    $useConfiguredExclusions = $false
+    if ($usableExcludedPatterns.Count -gt 0) {
+        $excludedPatternsLabel = $usableExcludedPatterns -join ', '
+        $useConfiguredExclusions = Read-YesNo "Apply configured filename exclusions ($excludedPatternsLabel)?" $true
+    } else {
+        Write-Host 'No default filename exclusion patterns are configured.' -ForegroundColor DarkGray
+    }
+
+    $extraExcludedPatterns = @()
+    $addExtraExclusions = Read-YesNo 'Add extra filename exclusion keywords for this run?' $false
+    if ($addExtraExclusions) {
+        while ($extraExcludedPatterns.Count -eq 0) {
+            $extraExcludeInput = Read-Host 'Enter extra exclusion keywords separated by commas or semicolons (e.g. openvino, debug)'
+            $extraExcludedPatterns = @($extraExcludeInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+            if ($extraExcludedPatterns.Count -eq 0) {
+                Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
+            }
         }
     }
-}
 
-$includeMsi = Read-YesNo 'Download .msi files?' $true
-$includeSourceZip = Read-YesNo 'Download the release source code ZIP?' $true
-$includeReadme = Read-YesNo 'Download README.md from the repository default branch?' $true
+    if ($useConfiguredExclusions) { $activeExcludedPatterns += $usableExcludedPatterns }
+    if ($extraExcludedPatterns.Count -gt 0) { $activeExcludedPatterns += $extraExcludedPatterns }
+    $activeExcludedPatterns = @($activeExcludedPatterns | Select-Object -Unique)
+    $useExcludedNamePatterns = ($activeExcludedPatterns.Count -gt 0)
+
+    $useOnlyMatchingNames = Read-YesNo 'Download only release assets whose names contain at least one keyword you specify?' $false
+    if ($useOnlyMatchingNames) {
+        while ($includeOnlyNamePatterns.Count -eq 0) {
+            $patternInput = Read-Host 'Enter filename keywords separated by commas or semicolons (e.g. cuda, vulkan, win-cuda)'
+            $includeOnlyNamePatterns = @($patternInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+            if ($includeOnlyNamePatterns.Count -eq 0) {
+                Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
+            }
+        }
+    }
+
+    $includeMsi = Read-YesNo 'Download .msi files?' $true
+    $includeSourceZip = Read-YesNo 'Download the release source code ZIP?' $true
+    $includeReadme = Read-YesNo 'Download README.md from the repository default branch?' $true
+} else {
+    Write-Host 'Filters are disabled. All release assets, including .msi files, are eligible for download.' -ForegroundColor Green
+    Write-Host 'Source ZIP and README.md downloads are enabled.' -ForegroundColor Green
+}
 
 Write-Host ''
 Write-Host '========== aria2 settings ==========' -ForegroundColor Cyan
