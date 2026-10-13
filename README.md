@@ -7,9 +7,18 @@ The script is useful when you regularly download binary builds from several proj
 ## Features
 
 - **Download the newest release** for one or more repositories configured in the script.
+- **Choose the release channel per repository:** `Stable` or `Pre-release`.# GitHub Release Downloader
+
+A small interactive PowerShell script for downloading release assets from GitHub repositories with [aria2](https://github.com/aria2/aria2). It is designed for Windows and keeps its repository list and default settings in a single `.ps1` file—no separate configuration file is required.
+
+The script is useful when you regularly download binary builds from several projects and want to select the release channel, filter unwanted platforms, control parallel downloads, and resume interrupted transfers.
+
+## Features
+
+- **Download the newest release** for one or more repositories configured in the script.
 - **Choose the release channel per repository:** `Stable` or `Pre-release`.
 - **Download a specific published release** by pasting its GitHub release URL, for example `https://github.com/storytold/photocraft/releases/tag/v0.7.0`.
-- **Filter assets before downloading:** optionally exclude or include platform-specific files and `.msi` installers.
+- **Flexible filename filters:** edit a list of exclusion patterns in the script or enable an include-only filter to download assets whose names contain specified keywords; `.msi` downloads remain separately configurable.
 - **Optionally download the release source ZIP** and the repository's `README.md` from its default branch.
 - **Control parallelism:** select how many files aria2 downloads at once and how many connections it may use per file.
 - **Download repositories one by one.** Within the current repository, multiple files may download in parallel; the next repository starts after the current repository's queue finishes.
@@ -133,8 +142,8 @@ Open `Download-GitHub-Releases.ps1` in a text editor and find the **REPOSITORY L
 ```powershell
 $Repositories = @(
     [pscustomobject]@{ Owner = 'ggml-org';  Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
-    [pscustomobject]@{ Owner = 'earendil-works';   Name = 'pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'anomalyco'; Name = 'opencode';   ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'can1357';   Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'storytold'; Name = 'photocraft'; ReleaseChannel = 'Stable' }
     # Add more repositories by copying a line above.
 )
@@ -157,18 +166,57 @@ To add a repository, copy an entry and change its values. To change its release 
 
 A project may publish only stable releases or mostly pre-releases; set the channel separately for each repository. If the selected channel has no published release, the script reports that and continues to the next repository. It may still offer to download the repository README if that option is enabled.
 
-## Download options and defaults
+## Filename filters and download options
 
-Before creating the download queue, the script asks whether to include each of these categories. Press **Enter** at a prompt to use its default.
+Before building the download queue, the script asks which filename filters to apply. Filename filters apply to **release assets** only. The separately configured source ZIP and repository README are controlled by their own options and are not affected by filename filters.
+
+### Exclusion patterns (editable in the script)
+
+The `$ExcludedNamePatterns` array near the beginning of `Download-GitHub-Releases.ps1` lists asset-name fragments that should normally be skipped:
+
+```powershell
+$ExcludedNamePatterns = @(
+    'arm64'
+    'aarch64'
+    'riscv'
+    'darwin'
+    '.dmg'
+    # Add more exclusions below, one pattern per line:
+    # 'openvino'
+    # 'debug'
+)
+```
+
+To add an exclusion, add another quoted entry on its own line inside the array. No commas are needed between entries written on separate lines. To remove an exclusion, delete or comment out its line. For example, adding `'openvino'` excludes any release asset whose filename contains `openvino`.
+
+These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. During startup, the script asks whether to apply the configured exclusion list; the default is **Yes**. Choose `N` for a run in which those exclusions should be ignored without changing the script. You can also add temporary exclusion keywords for the current run; this is optional and defaults to **No**. Temporary keywords are entered as a comma- or semicolon-separated list, for example `openvino, debug`, and do not modify the script.
+
+Default exclusions are `arm64`, `aarch64`, `riscv`, `darwin`, and `.dmg`. This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
+
+### Include-only filter
+
+You can optionally limit release assets to files whose names contain at least one keyword you specify. The prompt defaults to **No**. If enabled, enter keywords separated by commas or semicolons, for example:
+
+```text
+cuda, vulkan, windows
+```
+
+The script downloads an asset only when its filename contains `cuda`, `vulkan`, **or** `windows` (case-insensitively). You can enter one keyword or several. Keywords are literal substrings; regex syntax and wildcard characters are not interpreted specially.
+
+The exclusion list has priority: an asset matching an enabled exclusion pattern is skipped even if it also matches an include-only keyword. The `.msi` option is also evaluated, so disabling MSI downloads still excludes `.msi` files.
+
+### Download category defaults
+
+Press **Enter** at a yes/no prompt to accept its default.
 
 | Option | Default | Behavior |
 |---|---:|---|
-| Platform-specific assets | **No** | Excludes asset names containing `arm64`, `aarch64`, `riscv`, `darwin`, `-mac`, or `.dmg` unless enabled. Matching is case-insensitive. |
-| `.msi` installers | **Yes** | Includes assets whose names end in `.msi`. |
-| Release source ZIP | **Yes** | Adds GitHub's automatically generated ZIP archive for the selected release/tag, saved as `source-code.zip`. |
-| Repository README | **Yes** | Downloads the repository's `README.md` from its default branch into the release folder. |
-
-The platform filter is based on **file names**, not on the archive contents. It is a convenience filter, not a complete CPU/OS compatibility detector. For example, assets whose names do not contain any of the listed strings will not be excluded by that rule.
+| Apply configured filename exclusions | **Yes** | Skips release assets whose names contain any configured exclusion pattern. |
+| Add temporary exclusion keywords | **No** | Adds extra filename fragments to skip for this run only; does not change the script. |
+| Include-only filename filter | **No** | When enabled, downloads only release assets whose names contain at least one entered keyword. |
+| `.msi` installers | **Yes** | Allows assets whose names end in `.msi`; they must also pass any enabled filename filters. |
+| Release source ZIP | **Yes** | Adds GitHub's automatically generated ZIP archive for the selected release/tag, saved as `source-code.zip`. Not affected by filename filters. |
+| Repository README | **Yes** | Downloads the repository's `README.md` from its default branch into the release folder. Not affected by filename filters. |
 
 The README is taken from the repository's current default branch, not from the historical contents of the selected release tag. It can therefore differ from the README that existed when that release was published.
 
