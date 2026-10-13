@@ -180,7 +180,10 @@ $ExcludedNamePatterns = @(
     'aarch64'
     'riscv'
     'darwin'
-    '.dmg'
+    '-mac'
+    'sycl'
+    's390x'
+    'android'
     # Add more exclusions below, one pattern per line:
     # 'openvino'
     # 'debug'
