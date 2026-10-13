@@ -194,7 +194,7 @@ To add an exclusion, add another quoted entry on its own line inside the array. 
 
 These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. During startup, the script asks whether to apply the configured exclusion list; the default is **Yes**. Choose `N` for a run in which those exclusions should be ignored without changing the script. You can also add temporary exclusion keywords for the current run; this is optional and defaults to **No**. Temporary keywords are entered as a comma- or semicolon-separated list, for example `openvino, debug`, and do not modify the script.
 
-Default exclusions are `arm64`, `aarch64`, `riscv`, `darwin`, and `.dmg`. This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
+Default exclusions are arm64`, `aarch64`, `riscv`, `darwin`, `.dmg`, 'sycl', 's390x', and 'android'. This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
 
 ### Include-only filter
 
