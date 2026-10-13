@@ -7,19 +7,11 @@ The script is useful when you regularly download binary builds from several proj
 ## Features
 
 - **Download the newest release** for one or more repositories configured in the script.
-- **Choose the release channel per repository:** `Stable` or `Pre-release`.# GitHub Release Downloader
-
-A small interactive PowerShell script for downloading release assets from GitHub repositories with [aria2](https://github.com/aria2/aria2). It is designed for Windows and keeps its repository list and default settings in a single `.ps1` file—no separate configuration file is required.
-
-The script is useful when you regularly download binary builds from several projects and want to select the release channel, filter unwanted platforms, control parallel downloads, and resume interrupted transfers.
-
-## Features
-
-- **Download the newest release** for one or more repositories configured in the script.
 - **Choose the release channel per repository:** `Stable` or `Pre-release`.
 - **Download a specific published release** by pasting its GitHub release URL, for example `https://github.com/storytold/photocraft/releases/tag/v0.7.0`.
-- **Flexible filename filters:** edit a list of exclusion patterns in the script or enable an include-only filter to download assets whose names contain specified keywords; `.msi` downloads remain separately configurable.
-- **Optionally download the release source ZIP** and the repository's `README.md` from its default branch.
+- **Simple default behavior:** one filter prompt; answer `N` or press Enter to download all release assets without filename filters, plus the release source ZIP and repository `README.md`.
+- **Optional advanced filters:** enable configured exclusions, temporary exclusion keywords, include-only filename matching, and optional restrictions for `.msi`, Source ZIP, and README downloads.
+- **Adjustable aria2 logging:** aria2 console messages use the quieter `warn` log level by default.
 - **Control parallelism:** select how many files aria2 downloads at once and how many connections it may use per file.
 - **Download repositories one by one.** Within the current repository, multiple files may download in parallel; the next repository starts after the current repository's queue finishes.
 - **Resume interrupted downloads** with aria2.
@@ -168,11 +160,20 @@ A project may publish only stable releases or mostly pre-releases; set the chann
 
 ## Filename filters and download options
 
-Before building the download queue, the script asks which filename filters to apply. Filename filters apply to **release assets** only. The separately configured source ZIP and repository README are controlled by their own options and are not affected by filename filters.
+The filter workflow is intentionally simple by default. The script first asks one question:
+
+```text
+Apply filters and optional download restrictions for this run? [y/N]
+```
+
+- **Press Enter or answer `N`** to use the default, unfiltered mode. All release assets are eligible for download, including `.msi` files, and the script also queues the release source ZIP and the repository `README.md` when available. No filename-filter questions are asked.
+- **Answer `Y`** to open the advanced options. The script then asks whether to apply the configured exclusions, add temporary exclusion keywords, enable an include-only filename filter, and whether to include `.msi` installers, the source ZIP, and README.md.
+
+Filename filters apply to **release assets** only. Source ZIP and README downloads are not matched against filename keywords; in advanced mode, they can be independently disabled using their own prompts.
 
 ### Exclusion patterns (editable in the script)
 
-The `$ExcludedNamePatterns` array near the beginning of `Download-GitHub-Releases.ps1` lists asset-name fragments that should normally be skipped:
+The `$ExcludedNamePatterns` array near the beginning of `Download-GitHub-Releases.ps1` lists asset-name fragments to skip when the configured exclusions are enabled:
 
 ```powershell
 $ExcludedNamePatterns = @(
@@ -180,6 +181,7 @@ $ExcludedNamePatterns = @(
     'aarch64'
     'riscv'
     'darwin'
+    '.dmg'
     '-mac'
     'sycl'
     's390x'
@@ -190,15 +192,15 @@ $ExcludedNamePatterns = @(
 )
 ```
 
-To add an exclusion, add another quoted entry on its own line inside the array. No commas are needed between entries written on separate lines. To remove an exclusion, delete or comment out its line. For example, adding `'openvino'` excludes any release asset whose filename contains `openvino`.
+To add an exclusion, add another quoted entry on its own line inside the array. No commas are needed between entries written on separate lines. To remove an exclusion, delete or comment out its line. For example, adding `'openvino'` excludes any release asset whose filename contains `openvino` when configured exclusions are enabled.
 
-These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. During startup, the script asks whether to apply the configured exclusion list; the default is **Yes**. Choose `N` for a run in which those exclusions should be ignored without changing the script. You can also add temporary exclusion keywords for the current run; this is optional and defaults to **No**. Temporary keywords are entered as a comma- or semicolon-separated list, for example `openvino, debug`, and do not modify the script.
+These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. The default list contains `arm64`, `aarch64`, `riscv`, `darwin`, `.dmg`, `-mac`, `sycl`, `s390x`, and `android`, but **these exclusions are not applied in the default mode**. Opt into advanced filters to decide whether to apply them. You can also add temporary exclusion keywords for the current run; they do not modify the script.
 
-Default exclusions are arm64`, `aarch64`, `riscv`, `darwin`, `.dmg`, `sycl`, `s390x`, and `android`. This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
+This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
 
 ### Include-only filter
 
-You can optionally limit release assets to files whose names contain at least one keyword you specify. The prompt defaults to **No**. If enabled, enter keywords separated by commas or semicolons, for example:
+In advanced mode, you can optionally limit release assets to files whose names contain at least one keyword you specify. If enabled, enter keywords separated by commas or semicolons, for example:
 
 ```text
 cuda, vulkan, windows
@@ -206,22 +208,27 @@ cuda, vulkan, windows
 
 The script downloads an asset only when its filename contains `cuda`, `vulkan`, **or** `windows` (case-insensitively). You can enter one keyword or several. Keywords are literal substrings; regex syntax and wildcard characters are not interpreted specially.
 
-The exclusion list has priority: an asset matching an enabled exclusion pattern is skipped even if it also matches an include-only keyword. The `.msi` option is also evaluated, so disabling MSI downloads still excludes `.msi` files.
+The exclusion list has priority: an asset matching an enabled exclusion pattern is skipped even if it also matches an include-only keyword. Disabling MSI downloads also excludes `.msi` files. These filters apply only to release assets, not to `source-code.zip` or `README.md`.
 
-### Download category defaults
+### Download defaults
 
-Press **Enter** at a yes/no prompt to accept its default.
-
-| Option | Default | Behavior |
-|---|---:|---|
-| Apply configured filename exclusions | **Yes** | Skips release assets whose names contain any configured exclusion pattern. |
-| Add temporary exclusion keywords | **No** | Adds extra filename fragments to skip for this run only; does not change the script. |
-| Include-only filename filter | **No** | When enabled, downloads only release assets whose names contain at least one entered keyword. |
-| `.msi` installers | **Yes** | Allows assets whose names end in `.msi`; they must also pass any enabled filename filters. |
-| Release source ZIP | **Yes** | Adds GitHub's automatically generated ZIP archive for the selected release/tag, saved as `source-code.zip`. Not affected by filename filters. |
-| Repository README | **Yes** | Downloads the repository's `README.md` from its default branch into the release folder. Not affected by filename filters. |
+| Option | Default behavior | When advanced filters are enabled |
+|---|---|---|
+| Apply filters | **No** | If enabled, prompts for the options below. |
+| Configured filename exclusions | **Off** | Asked whether to apply the `$ExcludedNamePatterns` list; default **Yes**. |
+| Temporary exclusion keywords | Not used | Optional; default **No**. Applies only to the current run. |
+| Include-only filename filter | **Off** | Optional; default **No**. Keeps assets matching at least one specified keyword. |
+| `.msi` installers | **Included** | Asked whether to include them; default **Yes**. |
+| Release source ZIP | **Included** | Asked whether to include it; default **Yes**. Saved as `source-code.zip`. |
+| Repository README | **Included** | Asked whether to include it; default **Yes**. Saved as `README.md`. |
 
 The README is taken from the repository's current default branch, not from the historical contents of the selected release tag. It can therefore differ from the README that existed when that release was published.
+
+The script also asks for the maximum number of simultaneous file downloads and connections per file later in startup; those concurrency settings are separate from the filter prompt.
+
+## aria2 console output
+
+The script starts aria2 with `--console-log-level=warn`, so routine informational messages are quieter and warnings/errors remain visible. To change this behavior, edit the `--console-log-level=warn` argument in `Download-GitHub-Releases.ps1`.
 
 ## Download concurrency
 
