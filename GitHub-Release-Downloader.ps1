@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-GitHub-Release-Downloader.ps1
+Download-GitHub-Releases.ps1
 
 Downloads assets from the selected release channel for each chosen GitHub repository.
 All repository settings are stored in this file; no extra config files are required.
@@ -30,8 +30,24 @@ $Repositories = @(
     [pscustomobject]@{ Owner = 'earendil-works'; Name = 'pi';         ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'anomalyco';     Name = 'opencode';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'storytold';     Name = 'photocraft'; ReleaseChannel = 'Stable' }
-
     # Add more repositories by copying a line above.
+)
+
+# Filename exclusion filters. Add or remove entries as needed.
+# Each entry is a literal substring matched case-insensitively against RELEASE ASSET names.
+# These are not regular expressions. For example, 'openvino' excludes any asset name containing it.
+$ExcludedNamePatterns = @(
+    'arm64'
+    'aarch64'
+    'riscv'
+    'darwin'
+    '-mac'
+    'sycl'
+    's390x'
+    'android'
+    # Add more exclusions below, one pattern per line, for example:
+    # 'openvino'
+    # 'debug'
 )
 
 # Default aria2 settings. They can also be changed when the script starts.
@@ -442,7 +458,47 @@ if ($mainChoice -match '^(?i:1|latest)$') {
 
 Write-Host ''
 Write-Host '========== Download options ==========' -ForegroundColor Cyan
-$includeSpecial = Read-YesNo 'Download files containing arm64, aarch64, riscv, darwin, -mac, or .dmg in the file name?' $false
+Write-Host 'Filename filters apply to release assets only. Source ZIP and README are controlled by their own options.' -ForegroundColor DarkGray
+
+$usableExcludedPatterns = @($ExcludedNamePatterns | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+$useConfiguredExclusions = $false
+if ($usableExcludedPatterns.Count -gt 0) {
+    $excludedPatternsLabel = $usableExcludedPatterns -join ', '
+    $useConfiguredExclusions = Read-YesNo "Apply configured filename exclusions ($excludedPatternsLabel)?" $true
+} else {
+    Write-Host 'No default filename exclusion patterns are configured.' -ForegroundColor DarkGray
+}
+
+$extraExcludedPatterns = @()
+$addExtraExclusions = Read-YesNo 'Add extra filename exclusion keywords for this run?' $false
+if ($addExtraExclusions) {
+    while ($extraExcludedPatterns.Count -eq 0) {
+        $extraExcludeInput = Read-Host 'Enter extra exclusion keywords separated by commas or semicolons (e.g. openvino, debug)'
+        $extraExcludedPatterns = @($extraExcludeInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+        if ($extraExcludedPatterns.Count -eq 0) {
+            Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
+        }
+    }
+}
+
+$activeExcludedPatterns = @()
+if ($useConfiguredExclusions) { $activeExcludedPatterns += $usableExcludedPatterns }
+if ($extraExcludedPatterns.Count -gt 0) { $activeExcludedPatterns += $extraExcludedPatterns }
+$activeExcludedPatterns = @($activeExcludedPatterns | Select-Object -Unique)
+$useExcludedNamePatterns = ($activeExcludedPatterns.Count -gt 0)
+
+$useOnlyMatchingNames = Read-YesNo 'Download only release assets whose names contain at least one keyword you specify?' $false
+$includeOnlyNamePatterns = @()
+if ($useOnlyMatchingNames) {
+    while ($includeOnlyNamePatterns.Count -eq 0) {
+        $patternInput = Read-Host 'Enter filename keywords separated by commas or semicolons (e.g. cuda, vulkan, win-cuda)'
+        $includeOnlyNamePatterns = @($patternInput -split '[,;]' | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+        if ($includeOnlyNamePatterns.Count -eq 0) {
+            Write-Host 'Enter at least one non-empty keyword.' -ForegroundColor Yellow
+        }
+    }
+}
+
 $includeMsi = Read-YesNo 'Download .msi files?' $true
 $includeSourceZip = Read-YesNo 'Download the release source code ZIP?' $true
 $includeReadme = Read-YesNo 'Download README.md from the repository default branch?' $true
@@ -549,14 +605,42 @@ foreach ($repo in $selectedRepos) {
         foreach ($asset in @($release.assets)) {
             $assetName = [string]$asset.name
             if ([string]::IsNullOrWhiteSpace($assetName)) { continue }
-            if (-not $includeSpecial -and $assetName -match '(?i)(arm64|aarch64|riscv|darwin|-mac|\.dmg)') {
-                Write-Host "  Excluded by platform filter: $assetName" -ForegroundColor DarkGray
-                continue
+
+            # Exclusion patterns are literal, case-insensitive substrings.
+            # Exclusions take priority over the optional include-only filter.
+            if ($useExcludedNamePatterns) {
+                $matchedExclusionPattern = $null
+                foreach ($pattern in $activeExcludedPatterns) {
+                    if ($assetName.IndexOf([string]$pattern, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                        $matchedExclusionPattern = [string]$pattern
+                        break
+                    }
+                }
+                if ($null -ne $matchedExclusionPattern) {
+                    Write-Host "  Excluded by filename pattern '$matchedExclusionPattern': $assetName" -ForegroundColor DarkGray
+                    continue
+                }
             }
+
             if (-not $includeMsi -and $assetName -match '(?i)\.msi$') {
                 Write-Host "  Excluded by MSI filter: $assetName" -ForegroundColor DarkGray
                 continue
             }
+
+            if ($useOnlyMatchingNames) {
+                $matchedIncludePattern = $null
+                foreach ($pattern in $includeOnlyNamePatterns) {
+                    if ($assetName.IndexOf([string]$pattern, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                        $matchedIncludePattern = [string]$pattern
+                        break
+                    }
+                }
+                if ($null -eq $matchedIncludePattern) {
+                    Write-Host "  Excluded by include-only filename filter: $assetName" -ForegroundColor DarkGray
+                    continue
+                }
+            }
+
             Add-DownloadTask -TaskList $tasks -UsedNames $usedNames -Repository $fullName -Folder $folder `
                 -Url ([string]$asset.browser_download_url) -FileName $assetName -Kind 'Asset'
         }
@@ -627,7 +711,14 @@ foreach ($plan in $repositoryPlans) {
 }
 Write-Host "Files queued: $totalPending; already present: $alreadyPresent"
 Write-Host "Per repository: up to $MaxConcurrentDownloads simultaneous file(s), $ConnectionsPerFile connection(s) per file"
-Write-Host "Platform-specific files: $(if ($includeSpecial) { 'Yes' } else { 'No' }); MSI: $(if ($includeMsi) { 'Yes' } else { 'No' }); Source ZIP: $(if ($includeSourceZip) { 'Yes' } else { 'No' }); README.md: $(if ($includeReadme) { 'Yes' } else { 'No' })"
+Write-Host "Active filename exclusions: $(if ($useExcludedNamePatterns) { $activeExcludedPatterns -join ', ' } else { 'None' })"
+if ($useOnlyMatchingNames) {
+    Write-Host "Include-only filename patterns: $($includeOnlyNamePatterns -join ', ')"
+} else {
+    Write-Host 'Include-only filename filter: Disabled'
+}
+Write-Host "MSI: $(if ($includeMsi) { 'Yes' } else { 'No' }); Source ZIP: $(if ($includeSourceZip) { 'Yes' } else { 'No' }); README.md: $(if ($includeReadme) { 'Yes' } else { 'No' })"
+Write-Host 'Filename filters affect release assets only; source ZIP and README follow their own options.'
 Write-Host 'Repositories will be downloaded one by one, in repository-list order.'
 
 if ($totalPending -eq 0) {
