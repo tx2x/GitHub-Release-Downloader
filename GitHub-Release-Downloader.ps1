@@ -26,12 +26,13 @@ $ErrorActionPreference = 'Stop'
 # ReleaseChannel must be 'Stable' or 'Pre-release'.
 # ============================================================================
 $Repositories = @(
-    [pscustomobject]@{ Owner = 'ggml-org';      Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
-    [pscustomobject]@{ Owner = 'earendil-works'; Name = 'pi';         ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'anomalyco';     Name = 'opencode';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'photocraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'matthart1983';     Name = 'netwatch';    ReleaseChannel = 'Stable' }
-    # Add more repositories by copying a line above.
+	[pscustomobject]@{ Owner = 'ggml-org';	Name = 'llama.cpp';	ReleaseChannel = 'Pre-release' }
+	[pscustomobject]@{ Owner = 'earendil-works';	Name = 'pi';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'anomalyco';	Name = 'opencode';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'storytold';	Name = 'photocraft';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'matthart1983';	Name = 'netwatch';	ReleaseChannel = 'Stable' }
+		# Add more repositories by copying a line above.
+
 )
 
 # Filename exclusion filters. Add or remove entries as needed.
