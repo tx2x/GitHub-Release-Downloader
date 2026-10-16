@@ -29,20 +29,8 @@ $Repositories = @(
     [pscustomobject]@{ Owner = 'ggml-org';      Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
     [pscustomobject]@{ Owner = 'earendil-works'; Name = 'pi';         ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'anomalyco';     Name = 'opencode';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'can1357';       Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'storytold';     Name = 'photocraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'lightcraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'filmcraft';  ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'effectcraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'soundcraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'designcraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'vectorcraft'; ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'pdfcraft';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'wordcraft';  ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'gridcraft';  ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'deckcraft';  ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold';     Name = 'cadcraft';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'Comfy-Org';     Name = 'ComfyUI';    ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'matthart1983';     Name = 'netwatch';    ReleaseChannel = 'Stable' }
     # Add more repositories by copying a line above.
 )
 
@@ -55,6 +43,10 @@ $ExcludedNamePatterns = @(
     'riscv'
     'darwin'
     '.dmg'
+    '-mac'
+    'sycl'
+    's390x'
+    'android'
     # Add more exclusions below, one pattern per line, for example:
     # 'openvino'
     # 'debug'
