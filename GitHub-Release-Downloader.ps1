@@ -29,7 +29,20 @@ $Repositories = @(
     [pscustomobject]@{ Owner = 'ggml-org';      Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
     [pscustomobject]@{ Owner = 'earendil-works'; Name = 'pi';         ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'anomalyco';     Name = 'opencode';   ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'can1357';       Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
     [pscustomobject]@{ Owner = 'storytold';     Name = 'photocraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'lightcraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'filmcraft';  ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'effectcraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'soundcraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'designcraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'vectorcraft'; ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'pdfcraft';   ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'wordcraft';  ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'gridcraft';  ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'deckcraft';  ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'storytold';     Name = 'cadcraft';   ReleaseChannel = 'Stable' }
+    [pscustomobject]@{ Owner = 'Comfy-Org';     Name = 'ComfyUI';    ReleaseChannel = 'Stable' }
     # Add more repositories by copying a line above.
 )
 
@@ -42,10 +55,6 @@ $ExcludedNamePatterns = @(
     'riscv'
     'darwin'
     '.dmg'
-    '-mac'
-    'sycl'
-    's390x'
-    'android'
     # Add more exclusions below, one pattern per line, for example:
     # 'openvino'
     # 'debug'
@@ -55,6 +64,12 @@ $ExcludedNamePatterns = @(
 $DefaultMaxConcurrentDownloads = 2  # Simultaneous files within one repository
 $DefaultConnectionsPerFile     = 4  # Connections/segments per file
 $MinSplitSize                  = '1M'
+
+# Download error handling: change this value to 1, 2, or 3.
+# 1 = log/notify, skip the failed task, and continue.
+# 2 = pause new tasks and ask: retry, skip, or stop after a failure.
+# 3 = log/notify, retry the task once, then skip after 2 failed task attempts (default).
+$DefaultErrorHandlingMode = 3
 
 $GitHubHeaders = @{
     'User-Agent' = 'PowerShell-GitHub-Release-Downloader'
@@ -405,6 +420,142 @@ function Add-DownloadTask {
     })
 }
 
+function Protect-LogText {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) { return '' }
+    # GitHub release download URLs may contain temporary signed query strings.
+    # Redact query strings so the log does not retain signed URL tokens.
+    $safe = [System.Text.RegularExpressions.Regex]::Replace(
+        $Text,
+        '(?i)(https?://[^\s?]+)\?[^\s]+',
+        '$1?[query redacted]'
+    )
+    $safe = [System.Text.RegularExpressions.Regex]::Replace(
+        $safe,
+        '(?i)(Authorization\s*:\s*Bearer\s+)\S+',
+        '$1[redacted]'
+    )
+    return $safe
+}
+
+function Write-DownloaderLog {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('INFO', 'WARN', 'ERROR')][string]$Level,
+        [string]$Repository = '',
+        [string]$FileName = '',
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Message
+    )
+
+    if ([string]::IsNullOrWhiteSpace([string]$script:ErrorLogPath)) { return }
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $context = ''
+    if (-not [string]::IsNullOrWhiteSpace($Repository)) { $context += " [$Repository]" }
+    if (-not [string]::IsNullOrWhiteSpace($FileName)) { $context += " [$FileName]" }
+
+    $safeMessage = Protect-LogText -Text $Message
+    $messageLines = @($safeMessage -split '\r?\n')
+    $logLines = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($messageLine in $messageLines) {
+        $logLines.Add("[$timestamp] [$Level]$context $messageLine")
+    }
+
+    try {
+        $encoding = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::AppendAllText($script:ErrorLogPath, (($logLines -join [Environment]::NewLine) + [Environment]::NewLine), $encoding)
+    } catch {
+        Write-Host "Could not write the download log '$($script:ErrorLogPath)': $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+function Get-Aria2ErrorLines {
+    param([string]$LogPath)
+
+    if ([string]::IsNullOrWhiteSpace($LogPath) -or -not (Test-Path -LiteralPath $LogPath)) {
+        return @()
+    }
+
+    try {
+        $allLines = @(Get-Content -LiteralPath $LogPath -ErrorAction Stop)
+        $errorLines = @($allLines | Where-Object {
+            $_ -match '(?i)error|exception|failed|aborted|cannot|could not|denied|no space|warn|errorcode|errormessage'
+        })
+        if ($errorLines.Count -eq 0) { $errorLines = @($allLines | Select-Object -Last 12) }
+        return @($errorLines | Select-Object -Last 20 | ForEach-Object { Protect-LogText -Text ([string]$_) })
+    } catch {
+        return @("Could not read aria2 log: $($_.Exception.Message)")
+    }
+}
+
+function Start-Aria2DownloadTask {
+    param(
+        [Parameter(Mandatory = $true)]$Task,
+        [Parameter(Mandatory = $true)][string]$Aria2Path,
+        [Parameter(Mandatory = $true)][int]$ConnectionsPerFile,
+        [Parameter(Mandatory = $true)][string]$MinSplitSize
+    )
+
+    $taskId = [guid]::NewGuid().ToString('N')
+    $tempRoot = [System.IO.Path]::GetTempPath()
+    $inputFile = Join-Path $tempRoot "aria2-github-release-$taskId.txt"
+    $aria2Log = Join-Path $tempRoot "aria2-github-release-$taskId.log"
+    $outputFolderForAria2 = ([string]$Task.Folder) -replace '\\', '/'
+    $inputLines = @(
+        [string]$Task.Url
+        "  dir=$outputFolderForAria2"
+        "  out=$($Task.FileName)"
+    )
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+    try {
+        [System.IO.File]::WriteAllLines($inputFile, $inputLines, $utf8NoBom)
+        $arguments = @(
+            ('"--input-file={0}"' -f $inputFile)
+            '--max-concurrent-downloads=1'
+            "--max-connection-per-server=$ConnectionsPerFile"
+            "--split=$ConnectionsPerFile"
+            "--min-split-size=$MinSplitSize"
+            '--continue=true'
+            '--auto-file-renaming=false'
+            '--allow-overwrite=false'
+            '--retry-wait=5'
+            '--max-tries=2'
+            '--console-log-level=warn'
+            '--summary-interval=5'
+            ('"--log={0}"' -f $aria2Log)
+            '--log-level=warn'
+        )
+        $process = Start-Process -FilePath $Aria2Path -ArgumentList $arguments -PassThru -NoNewWindow -ErrorAction Stop
+        return [pscustomobject]@{
+            Task = $Task
+            Process = $process
+            Attempt = [int]$Task.FailedAttempts + 1
+            InputFile = $inputFile
+            LogFile = $aria2Log
+            StartError = $null
+        }
+    } catch {
+        return [pscustomobject]@{
+            Task = $Task
+            Process = $null
+            Attempt = [int]$Task.FailedAttempts + 1
+            InputFile = $inputFile
+            LogFile = $aria2Log
+            StartError = $_.Exception.Message
+        }
+    }
+}
+
+function Remove-Aria2TaskTemporaryFiles {
+    param($Job)
+
+    foreach ($path in @($Job.InputFile, $Job.LogFile)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$path)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # Check aria2 before making API requests.
 $aria2Command = Get-Command 'aria2c' -CommandType Application -ErrorAction SilentlyContinue
 if (-not $aria2Command) {
@@ -415,6 +566,12 @@ if (-not $aria2Command) {
 }
 $aria2Path = $aria2Command.Source
 $OutputRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
+$script:ErrorLogPath = Join-Path $OutputRoot 'Download-GitHub-Releases.log'
+if ($DefaultErrorHandlingMode -notin @(1, 2, 3)) {
+    Write-Host 'Invalid $DefaultErrorHandlingMode value. Falling back to mode 3.' -ForegroundColor Yellow
+    $DefaultErrorHandlingMode = 3
+}
+Write-DownloaderLog -Level INFO -Message 'Run started.'
 
 Write-Host ''
 Write-Host '========== GitHub Release Downloader ==========' -ForegroundColor Cyan
@@ -580,6 +737,7 @@ foreach ($repo in $selectedRepos) {
         }
     } catch {
         Write-Host "Could not retrieve release information: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-DownloaderLog -Level ERROR -Repository $fullName -Message "Could not retrieve release information: $($_.Exception.Message)"
         if ($_.Exception.Message -match '(?i)403|rate limit') {
             if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
                 Write-Host '  Fix: run gh auth login, then rerun this script. A saved gh token is used automatically.' -ForegroundColor Yellow
@@ -683,6 +841,7 @@ foreach ($repo in $selectedRepos) {
             }
         } catch {
             Write-Host "  README.md could not be retrieved: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-DownloaderLog -Level WARN -Repository $fullName -FileName 'README.md' -Message "Could not retrieve README.md: $($_.Exception.Message)"
             Write-Host '  Continuing without README.md.' -ForegroundColor DarkYellow
         }
     }
@@ -747,60 +906,205 @@ if ($totalPending -eq 0) {
 }
 if (-not (Read-YesNo 'Start downloading now?' $true)) { Write-Host 'Download cancelled.'; exit 0 }
 
-$failedRepositories = New-Object 'System.Collections.Generic.List[string]'
-$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$failedTasks = New-Object 'System.Collections.Generic.List[string]'
+$successfulTasks = 0
+$skippedAfterErrors = 0
+$failedAttemptsTotal = 0
+$stoppedByUser = $false
+$errorModeText = switch ($DefaultErrorHandlingMode) {
+    1 { 'Mode 1: log/notify, skip a failed task, and continue.' }
+    2 { 'Mode 2: pause new tasks after an error and ask whether to retry, skip, or stop.' }
+    3 { 'Mode 3: retry a failed task once; skip after 2 failed task attempts (default).' }
+}
+Write-Host "Error handling: $errorModeText" -ForegroundColor Cyan
+Write-Host "Error log: $script:ErrorLogPath" -ForegroundColor DarkGray
+Write-DownloaderLog -Level INFO -Message "Error handling selected: $errorModeText"
 
 foreach ($plan in $repositoryPlans) {
+    if ($stoppedByUser) { break }
     if ($plan.PendingTasks.Count -eq 0) { continue }
+
     Write-Host "`n========== Downloading $($plan.Repository) [$($plan.Channel); $($plan.Tag)] ==========" -ForegroundColor Cyan
+    Write-DownloaderLog -Level INFO -Repository $plan.Repository -Message "Starting release queue for tag '$($plan.Tag)' with $($plan.PendingTasks.Count) task(s)."
 
-    $tempList = Join-Path ([System.IO.Path]::GetTempPath()) ("aria2-github-release-{0}.txt" -f [guid]::NewGuid().ToString('N'))
-    $inputLines = New-Object 'System.Collections.Generic.List[string]'
+    $pendingTasks = New-Object 'System.Collections.Generic.List[object]'
     foreach ($task in $plan.PendingTasks) {
-        $dirForAria2 = ([string]$task.Folder) -replace '\\', '/'
-        $inputLines.Add([string]$task.Url)
-        $inputLines.Add("  dir=$dirForAria2")
-        $inputLines.Add("  out=$($task.FileName)")
+        if (-not ($task.PSObject.Properties.Name -contains 'FailedAttempts')) {
+            $task | Add-Member -MemberType NoteProperty -Name FailedAttempts -Value 0
+        }
+        $pendingTasks.Add($task)
     }
-    [System.IO.File]::WriteAllLines($tempList, $inputLines.ToArray(), $utf8NoBom)
+    $activeJobs = New-Object 'System.Collections.Generic.List[object]'
+    $decisionQueue = New-Object 'System.Collections.Generic.List[object]'
 
-    $aria2ExitCode = 1
-    try {
-        & $aria2Path `
-            "--input-file=$tempList" `
-            "--max-concurrent-downloads=$MaxConcurrentDownloads" `
-            "--max-connection-per-server=$ConnectionsPerFile" `
-            "--split=$ConnectionsPerFile" `
-            "--min-split-size=$MinSplitSize" `
-            '--continue=true' `
-            '--auto-file-renaming=false' `
-            '--allow-overwrite=false' `
-            '--retry-wait=5' `
-            '--max-tries=5' `
-            '--console-log-level=warn' `
-            '--summary-interval=1'
-        $aria2ExitCode = $LASTEXITCODE
-    } catch {
-        Write-Host "aria2 failed for $($plan.Repository): $($_.Exception.Message)" -ForegroundColor Red
-        $aria2ExitCode = 1
-    } finally {
-        Remove-Item -LiteralPath $tempList -Force -ErrorAction SilentlyContinue
+    while (($pendingTasks.Count -gt 0) -or ($activeJobs.Count -gt 0) -or ($decisionQueue.Count -gt 0)) {
+        if ($stoppedByUser) { break }
+
+        # In interactive mode, wait for all in-flight downloads to finish before asking.
+        # Do not schedule additional files while an error decision is pending.
+        if ($DefaultErrorHandlingMode -eq 2 -and $activeJobs.Count -eq 0 -and $decisionQueue.Count -gt 0) {
+            $failedJob = $decisionQueue[0]
+            $decisionQueue.RemoveAt(0)
+            $failedTask = $failedJob.Task
+            Write-Host ''
+            Write-Host "A download failed: $($failedTask.Repository) / $($failedTask.FileName)" -ForegroundColor Red
+            Write-Host 'R = retry this task; S = skip this task and continue; Q = stop the remaining downloads.'
+            while ($true) {
+                $action = (Read-Host 'Action [R/S/Q]').Trim()
+                if ($action -match '^(?i:r|retry)$') {
+                    Write-DownloaderLog -Level WARN -Repository $failedTask.Repository -FileName $failedTask.FileName -Message 'User selected retry after a failed attempt.'
+                    $pendingTasks.Insert(0, $failedTask)
+                    break
+                } elseif ($action -match '^(?i:s|skip)$') {
+                    $skippedAfterErrors++
+                    [void]$failedTasks.Add("$($failedTask.Repository) / $($failedTask.FileName)")
+                    Write-DownloaderLog -Level WARN -Repository $failedTask.Repository -FileName $failedTask.FileName -Message 'User chose to skip this failed task and continue.'
+                    Write-Host 'Skipping this task and continuing.' -ForegroundColor Yellow
+                    break
+                } elseif ($action -match '^(?i:q|quit|stop)$') {
+                    $stoppedByUser = $true
+                    Write-DownloaderLog -Level WARN -Repository $failedTask.Repository -FileName $failedTask.FileName -Message 'User stopped the download run after an error.'
+                    Write-Host 'Stopping the remaining downloads.' -ForegroundColor Yellow
+                    break
+                }
+                Write-Host 'Enter R, S, or Q.' -ForegroundColor Yellow
+            }
+            continue
+        }
+
+        while (($activeJobs.Count -lt $MaxConcurrentDownloads) -and ($pendingTasks.Count -gt 0) -and
+               -not ($DefaultErrorHandlingMode -eq 2 -and $decisionQueue.Count -gt 0) -and -not $stoppedByUser) {
+            $task = $pendingTasks[0]
+            $pendingTasks.RemoveAt(0)
+            $attemptNumber = [int]$task.FailedAttempts + 1
+            Write-Host ("Starting: {0} / {1} (attempt {2})" -f $task.Repository, $task.FileName, $attemptNumber) -ForegroundColor DarkGray
+            $job = Start-Aria2DownloadTask -Task $task -Aria2Path $aria2Path -ConnectionsPerFile $ConnectionsPerFile -MinSplitSize $MinSplitSize
+            $activeJobs.Add($job)
+            if ($null -ne $job.StartError) {
+                Write-Host "Could not start aria2: $($job.StartError)" -ForegroundColor Red
+            }
+        }
+
+        $completedJobs = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($job in @($activeJobs.ToArray())) {
+            $finished = $false
+            if ($null -eq $job.Process) {
+                $finished = $true
+            } else {
+                try { $finished = $job.Process.HasExited } catch { $finished = $true }
+            }
+            if ($finished) { $completedJobs.Add($job) }
+        }
+
+        foreach ($job in $completedJobs) {
+            [void]$activeJobs.Remove($job)
+            $task = $job.Task
+            $destination = Join-Path $task.Folder $task.FileName
+            $aria2ControlFile = "$destination.aria2"
+            $exitCode = -1
+            if ($null -ne $job.Process) {
+                try { $exitCode = [int]$job.Process.ExitCode } catch { $exitCode = -1 }
+            }
+
+            $fileIsPresent = Test-Path -LiteralPath $destination
+            $fileHasContent = $false
+            if ($fileIsPresent) {
+                try { $fileHasContent = ((Get-Item -LiteralPath $destination -ErrorAction Stop).Length -gt 0) } catch { $fileHasContent = $false }
+            }
+            $taskSucceeded = ($null -eq $job.StartError) -and ($exitCode -eq 0) -and $fileHasContent -and -not (Test-Path -LiteralPath $aria2ControlFile)
+
+            if ($taskSucceeded) {
+                $successfulTasks++
+                Write-Host "Completed: $($task.Repository) / $($task.FileName)" -ForegroundColor Green
+                Remove-Aria2TaskTemporaryFiles -Job $job
+                continue
+            }
+
+            $task.FailedAttempts = [int]$task.FailedAttempts + 1
+            $failedAttemptsTotal++
+            $detailLines = @(Get-Aria2ErrorLines -LogPath $job.LogFile)
+            if (-not [string]::IsNullOrWhiteSpace([string]$job.StartError)) {
+                $detailLines = @("Could not start aria2: $($job.StartError)") + $detailLines
+            }
+            if ($detailLines.Count -eq 0) {
+                $detailLines = @("aria2 exit code: $exitCode; destination file was not confirmed complete.", 'Check disk space, write permissions, network access, and the aria2 log output.')
+            }
+
+            Write-Host ''
+            Write-Host ("[DOWNLOAD ERROR] {0} / {1} (failed task attempt {2})." -f $task.Repository, $task.FileName, $task.FailedAttempts) -ForegroundColor Red
+            foreach ($detailLine in $detailLines) {
+                Write-Host ("  {0}" -f (Protect-LogText -Text ([string]$detailLine))) -ForegroundColor DarkYellow
+            }
+            Write-Host "  Details are being saved to: $script:ErrorLogPath" -ForegroundColor Yellow
+
+            $detailText = "Failed task attempt $($task.FailedAttempts); aria2 exit code $exitCode.`n" + ($detailLines -join "`n")
+            Write-DownloaderLog -Level ERROR -Repository $task.Repository -FileName $task.FileName -Message $detailText
+            Remove-Aria2TaskTemporaryFiles -Job $job
+
+            # If aria2 left an output file without its control file, it cannot be
+            # resumed safely. Remove this known-failed partial file so a retry or
+            # the next script run is not blocked by the duplicate-file check.
+            if ((Test-Path -LiteralPath $destination) -and -not (Test-Path -LiteralPath $aria2ControlFile)) {
+                try {
+                    Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+                    Write-DownloaderLog -Level WARN -Repository $task.Repository -FileName $task.FileName -Message 'Removed incomplete output because no aria2 control file was available for resuming.'
+                } catch {
+                    Write-DownloaderLog -Level WARN -Repository $task.Repository -FileName $task.FileName -Message "Could not remove incomplete output file: $($_.Exception.Message)"
+                }
+            }
+
+            if ($DefaultErrorHandlingMode -eq 1) {
+                $skippedAfterErrors++
+                [void]$failedTasks.Add("$($task.Repository) / $($task.FileName)")
+                Write-DownloaderLog -Level WARN -Repository $task.Repository -FileName $task.FileName -Message 'Skipping failed task as configured (mode 1).'
+                Write-Host 'Mode 1: skipping this task and continuing with the next file.' -ForegroundColor Yellow
+            } elseif ($DefaultErrorHandlingMode -eq 2) {
+                $decisionQueue.Add([pscustomobject]@{ Task = $task; DetailLines = $detailLines })
+                Write-Host 'Mode 2: waiting for other active downloads to finish, then asking for the next action.' -ForegroundColor Yellow
+            } else {
+                if ([int]$task.FailedAttempts -lt 2) {
+                    Write-DownloaderLog -Level WARN -Repository $task.Repository -FileName $task.FileName -Message 'Automatic retry scheduled after the first failed task attempt (mode 3).'
+                    Write-Host 'Mode 3: retrying this task once.' -ForegroundColor Yellow
+                    $pendingTasks.Insert(0, $task)
+                } else {
+                    $skippedAfterErrors++
+                    [void]$failedTasks.Add("$($task.Repository) / $($task.FileName)")
+                    Write-DownloaderLog -Level WARN -Repository $task.Repository -FileName $task.FileName -Message 'Task failed twice; skipping it and continuing (mode 3).'
+                    Write-Host 'The task failed twice. Skipping it and continuing with the next file.' -ForegroundColor Yellow
+                }
+            }
+        }
+
+        if ($activeJobs.Count -gt 0 -and $completedJobs.Count -eq 0) {
+            Start-Sleep -Milliseconds 300
+        }
     }
 
-    if ($aria2ExitCode -eq 0) {
-        Write-Host "Finished: $($plan.Repository)" -ForegroundColor Green
-    } else {
-        Write-Host "aria2 exited with code $aria2ExitCode for $($plan.Repository). Continuing with the next repository." -ForegroundColor Yellow
-        [void]$failedRepositories.Add($plan.Repository)
+    if (-not $stoppedByUser) {
+        Write-Host "Finished queue for $($plan.Repository)." -ForegroundColor Cyan
+        Write-DownloaderLog -Level INFO -Repository $plan.Repository -Message "Finished processing release queue '$($plan.Tag)'."
     }
 }
 
 Write-Host ''
-if ($failedRepositories.Count -eq 0) {
-    Write-Host 'All queued downloads finished successfully.' -ForegroundColor Green
-    exit 0
+Write-Host '========== Download summary ==========' -ForegroundColor Cyan
+Write-Host "Successfully downloaded tasks: $successfulTasks"
+Write-Host "Tasks skipped after errors: $skippedAfterErrors"
+Write-Host "Failed task attempts: $failedAttemptsTotal"
+Write-Host "Error log: $script:ErrorLogPath"
+if ($failedTasks.Count -gt 0) {
+    Write-Host 'Tasks that were skipped after errors:' -ForegroundColor Yellow
+    foreach ($failedTaskName in $failedTasks) { Write-Host "  - $failedTaskName" -ForegroundColor Yellow }
 }
-Write-Host 'The following repositories had download errors:' -ForegroundColor Yellow
-foreach ($failedRepo in $failedRepositories) { Write-Host "  - $failedRepo" -ForegroundColor Yellow }
-Write-Host 'Review the aria2 output and run this script again to resume unfinished downloads.'
-exit 1
+if ($stoppedByUser) {
+    Write-Host 'Download run stopped at your request. Remaining tasks were not started.' -ForegroundColor Yellow
+    Write-DownloaderLog -Level WARN -Message 'Run stopped by user before all queued tasks were processed.'
+    exit 1
+}
+if ($skippedAfterErrors -gt 0) {
+    Write-Host 'Some downloads failed. Review the error log and rerun the script to resume unfinished tasks.' -ForegroundColor Yellow
+    exit 1
+}
+Write-Host 'All queued downloads finished successfully.' -ForegroundColor Green
+Write-DownloaderLog -Level INFO -Message "Run completed. Successful tasks: $successfulTasks; failed attempts: $failedAttemptsTotal; skipped tasks: $skippedAfterErrors."
+exit 0
