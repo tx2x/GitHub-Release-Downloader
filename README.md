@@ -11,6 +11,9 @@ The script is useful when you regularly download binary builds from several proj
 - **Download a specific published release** by pasting its GitHub release URL, for example `https://github.com/storytold/photocraft/releases/tag/v0.7.0`.
 - **Simple default behavior:** one filter prompt; answer `N` or press Enter to download all release assets without filename filters, plus the release source ZIP and repository `README.md`.
 - **Optional advanced filters:** enable configured exclusions, temporary exclusion keywords, include-only filename matching, and optional restrictions for `.msi`, Source ZIP, and README downloads.
+- **Visible download error notifications:** failed file tasks show the repository, filename, aria2 exit code, and available warning/error details.
+- **Persistent diagnostic log:** appends run events and error details to `Download-GitHub-Releases.log` beside the script. Temporary signed URL query strings are redacted before they are written to the log.
+- **Configurable error recovery:** choose a policy by changing `$DefaultErrorHandlingMode` near the top of the script; mode 3 is the default and retries a failed task once before skipping it.
 - **Adjustable aria2 logging:** aria2 console messages use the quieter `warn` log level by default.
 - **Control parallelism:** select how many files aria2 downloads at once and how many connections it may use per file.
 - **Download repositories one by one.** Within the current repository, multiple files may download in parallel; the next repository starts after the current repository's queue finishes.
@@ -182,10 +185,6 @@ $ExcludedNamePatterns = @(
     'riscv'
     'darwin'
     '.dmg'
-    '-mac'
-    'sycl'
-    's390x'
-    'android'
     # Add more exclusions below, one pattern per line:
     # 'openvino'
     # 'debug'
@@ -194,7 +193,7 @@ $ExcludedNamePatterns = @(
 
 To add an exclusion, add another quoted entry on its own line inside the array. No commas are needed between entries written on separate lines. To remove an exclusion, delete or comment out its line. For example, adding `'openvino'` excludes any release asset whose filename contains `openvino` when configured exclusions are enabled.
 
-These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. The default list contains `arm64`, `aarch64`, `riscv`, `darwin`, `.dmg`, `-mac`, `sycl`, `s390x`, and `android`, but **these exclusions are not applied in the default mode**. Opt into advanced filters to decide whether to apply them. You can also add temporary exclusion keywords for the current run; they do not modify the script.
+These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. The default list contains `arm64`, `aarch64`, `riscv`, `darwin`, and `.dmg`, but **these exclusions are not applied in the default mode**. Opt into advanced filters to decide whether to apply them. You can also add temporary exclusion keywords for the current run; they do not modify the script.
 
 This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
 
@@ -226,9 +225,39 @@ The README is taken from the repository's current default branch, not from the h
 
 The script also asks for the maximum number of simultaneous file downloads and connections per file later in startup; those concurrency settings are separate from the filter prompt.
 
+## Download error handling and logs
+
+The script checks each file task separately, so an aria2 failure can be attributed to a specific repository and filename. When a task fails, the script prints an explicit `[DOWNLOAD ERROR]` notification and shows the available aria2 warning/error details instead of relying only on the overall repository exit code.
+
+A persistent log is written beside the script:
+
+```text
+Download-GitHub-Releases.log
+```
+
+The log is appended to on each run and records timestamps, repository/file context, aria2 errors, and the recovery decision (retry, skip, or stop). Query strings on URLs are redacted before logging because GitHub may use temporary signed URLs containing time-limited tokens. You can open the log with Notepad or another text editor. It is safe to delete the log when you no longer need its history; a new one will be created on the next run.
+
+### Configure the error-handling policy
+
+To avoid adding more questions to the normal startup flow, the policy is controlled by one editable setting near the top of `Download-GitHub-Releases.ps1`:
+
+```powershell
+$DefaultErrorHandlingMode = 3
+```
+
+| Value | Behavior |
+|---|---|
+| `1` | Notify and log the error, skip that task, then continue with the remaining files. |
+| `2` | Stop scheduling new tasks after an error. Any already-running downloads are allowed to finish, then the script asks what to do with the failed task: `R` retries it, `S` skips it and continues, or `Q` stops the remaining downloads. |
+| `3` | **Default.** Notify and log the error, retry the task once, then skip it if the second task attempt also fails. The rest of the queue continues. |
+
+Mode 3 means up to two failed **task attempts** in the script; each aria2 attempt also has its own network retry setting. A recovered retry is counted as a successful download. If any tasks are ultimately skipped because of errors, the script prints a summary and exits with a non-zero exit code so the partial failure is not missed.
+
+If aria2 leaves a failed partial output without its `.aria2` control file, the script removes that known-failed partial file because it cannot be resumed safely. If the control file exists, aria2 can use it to resume the transfer on retry or on a later run.
+
 ## aria2 console output
 
-The script starts aria2 with `--console-log-level=warn`, so routine informational messages are quieter and warnings/errors remain visible. To change this behavior, edit the `--console-log-level=warn` argument in `Download-GitHub-Releases.ps1`.
+The script starts aria2 with `--console-log-level=warn`, so routine informational messages are quieter and warnings/errors remain visible. Each task also writes a temporary aria2 diagnostic log; when the task fails, the useful details are copied into `Download-GitHub-Releases.log`. To change the console log verbosity, edit the `--console-log-level=warn` argument in `Download-GitHub-Releases.ps1`.
 
 ## Download concurrency
 
@@ -305,9 +334,11 @@ https://github.com/OWNER/REPOSITORY/releases/tag/TAG
 
 The script does not support draft releases, arbitrary web pages, or non-GitHub release hosts.
 
-### aria2 reports a download error
+### A download fails or stops unexpectedly
 
-Review the URL, available disk space, network connection, and aria2 error details. Then rerun the script to retry or resume unfinished downloads. If GitHub is returning a rate-limit or access-denied response, reduce request frequency and try again later.
+Look for the `[DOWNLOAD ERROR]` notification in the console and open `Download-GitHub-Releases.log` beside the script. The log records the affected repository and filename, aria2's available diagnostic lines, and whether the script retried or skipped the task. Review available disk space, write permissions for the output folder, the network connection, and the reported aria2 error. Then rerun the script to retry or resume unfinished downloads. If GitHub is returning a rate-limit or access-denied response, reduce request frequency and try again later.
+
+If a task is skipped after errors, the script exits with code `1` even if other files downloaded successfully. This makes partial failures visible to anyone launching the script from another program.
 
 ## Safety, licensing, and responsible use
 
