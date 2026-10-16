@@ -136,11 +136,12 @@ Open `Download-GitHub-Releases.ps1` in a text editor and find the **REPOSITORY L
 
 ```powershell
 $Repositories = @(
-    [pscustomobject]@{ Owner = 'ggml-org';  Name = 'llama.cpp';  ReleaseChannel = 'Pre-release' }
-    [pscustomobject]@{ Owner = 'anomalyco'; Name = 'opencode';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'can1357';   Name = 'oh-my-pi';   ReleaseChannel = 'Stable' }
-    [pscustomobject]@{ Owner = 'storytold'; Name = 'photocraft'; ReleaseChannel = 'Stable' }
-    # Add more repositories by copying a line above.
+	[pscustomobject]@{ Owner = 'ggml-org';	Name = 'llama.cpp';	ReleaseChannel = 'Pre-release' }
+	[pscustomobject]@{ Owner = 'earendil-works';	Name = 'pi';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'anomalyco';	Name = 'opencode';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'storytold';	Name = 'photocraft';	ReleaseChannel = 'Stable' }
+	[pscustomobject]@{ Owner = 'matthart1983';	Name = 'netwatch';	ReleaseChannel = 'Stable' }
+		# Add more repositories by copying a line above.
 )
 ```
 
@@ -185,6 +186,10 @@ $ExcludedNamePatterns = @(
     'riscv'
     'darwin'
     '.dmg'
+    '-mac'
+    'sycl'
+    's390x'
+    'android'
     # Add more exclusions below, one pattern per line:
     # 'openvino'
     # 'debug'
@@ -193,7 +198,7 @@ $ExcludedNamePatterns = @(
 
 To add an exclusion, add another quoted entry on its own line inside the array. No commas are needed between entries written on separate lines. To remove an exclusion, delete or comment out its line. For example, adding `'openvino'` excludes any release asset whose filename contains `openvino` when configured exclusions are enabled.
 
-These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. The default list contains `arm64`, `aarch64`, `riscv`, `darwin`, and `.dmg`, but **these exclusions are not applied in the default mode**. Opt into advanced filters to decide whether to apply them. You can also add temporary exclusion keywords for the current run; they do not modify the script.
+These are **literal substrings**, not regular expressions or wildcards. Matching is case-insensitive, so `CUDA` also matches `cuda`. The default list contains `arm64`, `aarch64`, `riscv`, `darwin`, `.dmg`, `-mac`, `sycl`, `s390x`, and `android`, but **these exclusions are not applied in the default mode**. Opt into advanced filters to decide whether to apply them. You can also add temporary exclusion keywords for the current run; they do not modify the script.
 
 This is a filename-based convenience filter, not a complete CPU or OS compatibility detector.
 
